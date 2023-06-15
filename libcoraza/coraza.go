@@ -26,17 +26,32 @@ void send_log_to_cb(coraza_log_cb cb, const char *msg);
 */
 import "C"
 import (
+	"encoding/json"
+	"github.com/corazawaf/coraza/v3"
+	"github.com/corazawaf/coraza/v3/types"
 	"io"
 	"os"
 	"unsafe"
-
-	"github.com/corazawaf/coraza/v3"
-
-	"github.com/corazawaf/coraza/v3/types"
 )
 
 var wafMap = make(map[uint64]coraza.WAF)
 var txMap = make(map[uint64]types.Transaction)
+
+type MessageData struct {
+	Message   string             `json:"message"`
+	File_     string             `json:"file"`
+	Line_     int                `json:"line"`
+	ID_       int                `json:"id"`
+	Rev_      string             `json:"rev"`
+	Msg_      string             `json:"msg"`
+	Data_     string             `json:"data"`
+	Severity_ types.RuleSeverity `json:"severity"`
+	Ver_      string             `json:"ver"`
+	Maturity_ int                `json:"maturity"`
+	Accuracy_ int                `json:"accuracy"`
+	Tags_     []string           `json:"tags"`
+	Raw_      string             `json:"raw"`
+}
 
 /**
  * Creates a new  WAF instance
@@ -44,7 +59,9 @@ var txMap = make(map[uint64]types.Transaction)
  */
 //export coraza_new_waf
 func coraza_new_waf() C.coraza_waf_t {
-	waf, _ := coraza.NewWAF(coraza.NewWAFConfig())
+	waf, _ := coraza.NewWAF(coraza.NewWAFConfig().WithDirectivesFromFile("coraza.conf").
+		WithDirectivesFromFile("rules/crs-setup.conf").
+		WithDirectivesFromFile("rules/rules/*.conf"))
 	ptr := wafToPtr(waf)
 	wafMap[ptr] = waf
 	return C.coraza_waf_t(ptr)
@@ -278,6 +295,158 @@ func coraza_free_waf(t C.coraza_waf_t) C.int {
 
 //export coraza_set_log_cb
 func coraza_set_log_cb(waf C.coraza_waf_t, cb C.coraza_log_cb) {
+}
+
+//export coraza_get_log_data
+func coraza_get_log_data(t C.coraza_transaction_t) *C.char {
+	tx := ptrToTransaction(t)
+	if len(tx.MatchedLogRules()) == 0 {
+		return nil
+	}
+	// we need to build a json object with the matched rules
+	// and the corresponding data
+	var logData []byte
+	var err error
+
+	message := make([]MessageData, 0)
+	for _, mr := range tx.MatchedLogRules() {
+		if mr.Message() == "" {
+			continue
+		}
+		r := mr.Rule()
+		for _, matchData := range mr.MatchedDatas() {
+			message = append(message, MessageData{
+				Message:   mr.Message(),
+				File_:     mr.Rule().File(),
+				Line_:     mr.Rule().Line(),
+				ID_:       r.ID(),
+				Rev_:      r.Revision(),
+				Msg_:      matchData.Message(),
+				Data_:     matchData.Data(),
+				Severity_: r.Severity(),
+				Ver_:      r.Version(),
+				Maturity_: r.Maturity(),
+				Accuracy_: r.Accuracy(),
+				Tags_:     r.Tags(),
+			})
+		}
+	}
+	if logData, err = json.Marshal(message); err != nil {
+		return nil
+	}
+
+	return C.CString(string(logData))
+}
+
+//export coraza_free_log_data
+func coraza_free_log_data(log *C.char) {
+	C.free(unsafe.Pointer(log))
+}
+
+//export coraza_set_server_name
+func coraza_set_server_name(t C.coraza_transaction_t, name *C.char, name_len C.int) {
+	tx := ptrToTransaction(t)
+	tx.SetServerName(C.GoStringN(name, name_len))
+}
+
+// TODO: implement
+func coraza_request_body_reader() {
+
+}
+
+//export coraza_add_get_request_argument
+func coraza_add_get_request_argument(t C.coraza_transaction_t, key *C.char, key_len C.int, value *C.char, value_len C.int) {
+	tx := ptrToTransaction(t)
+	tx.AddGetRequestArgument(C.GoStringN(key, key_len), C.GoStringN(value, value_len))
+}
+
+//export coraza_add_post_request_argument
+func coraza_add_post_request_argument(t C.coraza_transaction_t, key *C.char, key_len C.int, value *C.char, value_len C.int) {
+	tx := ptrToTransaction(t)
+	tx.AddPostRequestArgument(C.GoStringN(key, key_len), C.GoStringN(value, value_len))
+}
+
+//export coraza_add_path_request_argument
+func coraza_add_path_request_argument(t C.coraza_transaction_t, key *C.char, key_len C.int, value *C.char, value_len C.int) {
+	tx := ptrToTransaction(t)
+	tx.AddPathRequestArgument(C.GoStringN(key, key_len), C.GoStringN(value, value_len))
+}
+
+//export coraza_add_response_argument
+func coraza_add_response_argument(t C.coraza_transaction_t, key *C.char, key_len C.int, value *C.char, value_len C.int) {
+	tx := ptrToTransaction(t)
+	tx.AddResponseArgument(C.GoStringN(key, key_len), C.GoStringN(value, value_len))
+}
+
+// TODO: implement
+func coraza_read_request_body_from() {
+
+}
+
+// TODO: impement
+func coraza_response_body_reader() {
+
+}
+
+// TODO:implement
+func coraza_read_response_body_from() {
+
+}
+
+//export coraza_is_rule_engine_off
+func coraza_is_rule_engine_off(t C.coraza_transaction_t) C.int {
+	tx := ptrToTransaction(t)
+	if tx.IsRuleEngineOff() {
+		return 1
+	}
+	return 0
+}
+
+//export coraza_is_request_body_accessible
+func coraza_is_request_body_accessible(t C.coraza_transaction_t) C.int {
+	tx := ptrToTransaction(t)
+	if tx.IsRequestBodyAccessible() {
+		return 1
+	}
+	return 0
+}
+
+//export coraza_is_response_body_accessible
+func coraza_is_response_body_accessible(t C.coraza_transaction_t) C.int {
+	tx := ptrToTransaction(t)
+	if tx.IsResponseBodyAccessible() {
+		return 1
+	}
+	return 0
+}
+
+//export coraza_is_response_body_processable
+func coraza_is_response_body_processable(t C.coraza_transaction_t) C.int {
+	tx := ptrToTransaction(t)
+	if tx.IsResponseBodyProcessable() {
+		return 1
+	}
+	return 0
+}
+
+//export coraza_is_interrupted
+func coraza_is_interrupted(t C.coraza_transaction_t) C.int {
+	tx := ptrToTransaction(t)
+	if tx.IsInterrupted() {
+		return 1
+	}
+	return 0
+}
+
+//export coraza_get_transcation_id
+func coraza_get_transcation_id(t C.coraza_transaction_t) *C.char {
+	tx := ptrToTransaction(t)
+	return C.CString(tx.ID())
+}
+
+//export coraza_free_transaction_id
+func coraza_free_transaction_id(id *C.char) {
+	C.free(unsafe.Pointer(id))
 }
 
 /*

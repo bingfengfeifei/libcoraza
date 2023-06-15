@@ -14,3 +14,5 @@ require (
 	golang.org/x/net v0.10.0 // indirect
 	rsc.io/binaryregexp v0.2.0 // indirect
 )
+
+replace github.com/corazawaf/coraza/v3 => github.com/bingfengfeifei/coraza/v3 v3.0.1-0.20230614100214-f704d6b65b8c

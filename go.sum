@@ -1,6 +1,6 @@
 github.com/anuraaga/go-modsecurity v0.0.0-20220824035035-b9a4099778df/go.mod h1:7jguE759ADzy2EkxGRXigiC0ER1Yq2IFk2qNtwgzc7U=
-github.com/corazawaf/coraza/v3 v3.0.0-rc.2.0.20230527015802-721d1de4db53 h1:r4+llOfRp1Zmmw4CujCBbkHFXz0+OuWWwaWan6egtSY=
-github.com/corazawaf/coraza/v3 v3.0.0-rc.2.0.20230527015802-721d1de4db53/go.mod h1:MjV/iyO+B+JcVEWUJi4O2r1sfHeFzlF28MnvAqWfea0=
+github.com/bingfengfeifei/coraza/v3 v3.0.1-0.20230614100214-f704d6b65b8c h1:8OSFzTo2Z/F5KZLjRFMifK7ymBKZQKYed9Gq0JCfTzY=
+github.com/bingfengfeifei/coraza/v3 v3.0.1-0.20230614100214-f704d6b65b8c/go.mod h1:nPq09Kmy9wb6UzpX3FXHxCHn+zcQoeio86Uspm5mnUA=
 github.com/corazawaf/libinjection-go v0.1.2 h1:oeiV9pc5rvJ+2oqOqXEAMJousPpGiup6f7Y3nZj5GoM=
 github.com/corazawaf/libinjection-go v0.1.2/go.mod h1:OP4TM7xdJ2skyXqNX1AN1wN5nNZEmJNuWbNPOItn7aw=
 github.com/foxcpp/go-mockdns v1.0.0 h1:7jBqxd3WDWwi/6WhDvacvH1XsN3rOLXyHM1uhvIx6FI=
