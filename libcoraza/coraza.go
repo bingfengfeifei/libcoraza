@@ -6,6 +6,7 @@ package main
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <string.h>
 
 typedef struct coraza_intervention_t
 {
@@ -29,13 +30,18 @@ import (
 	"encoding/json"
 	"github.com/corazawaf/coraza/v3"
 	"github.com/corazawaf/coraza/v3/types"
+	"hash/fnv"
 	"io"
+	"math/rand"
 	"os"
+	"path"
+	"reflect"
+	"sync"
 	"unsafe"
 )
 
-var wafMap = make(map[uint64]coraza.WAF)
-var txMap = make(map[uint64]types.Transaction)
+var wafMap = sync.Map{}
+var txMap = sync.Map{}
 
 type MessageData struct {
 	Message   string             `json:"message"`
@@ -63,7 +69,18 @@ func coraza_new_waf() C.coraza_waf_t {
 		WithDirectivesFromFile("rules/crs-setup.conf").
 		WithDirectivesFromFile("rules/rules/*.conf"))
 	ptr := wafToPtr(waf)
-	wafMap[ptr] = waf
+	wafMap.Store(ptr, waf)
+	return C.coraza_waf_t(ptr)
+}
+
+//export coraza_new_waf_with_base_path
+func coraza_new_waf_with_base_path(base *C.char) C.coraza_waf_t {
+	base_path := C.GoString(base)
+	waf, _ := coraza.NewWAF(coraza.NewWAFConfig().WithDirectivesFromFile(path.Join(base_path, "coraza.conf")).
+		WithDirectivesFromFile(path.Join(base_path, "rules/crs-setup.conf")).
+		WithDirectivesFromFile(path.Join(base_path, "rules/rules/*.conf")))
+	ptr := wafToPtr(waf)
+	wafMap.Store(ptr, waf)
 	return C.coraza_waf_t(ptr)
 }
 
@@ -78,7 +95,7 @@ func coraza_new_transaction(waf C.coraza_waf_t, logCb unsafe.Pointer) C.coraza_t
 	w := ptrToWaf(waf)
 	tx := w.NewTransaction()
 	ptr := transactionToPtr(tx)
-	txMap[ptr] = tx
+	txMap.Store(ptr, tx)
 	return C.coraza_transaction_t(ptr)
 }
 
@@ -87,7 +104,7 @@ func coraza_new_transaction_with_id(waf C.coraza_waf_t, id *C.char, logCb unsafe
 	w := ptrToWaf(waf)
 	tx := w.NewTransactionWithID(C.GoString(id))
 	ptr := transactionToPtr(tx)
-	txMap[ptr] = tx
+	txMap.Store(ptr, tx)
 	return C.coraza_transaction_t(ptr)
 }
 
@@ -106,9 +123,9 @@ func coraza_intervention(tx C.coraza_transaction_t) *C.coraza_intervention_t {
 //export coraza_process_connection
 func coraza_process_connection(t C.coraza_transaction_t, sourceAddress *C.char, clientPort C.int, serverHost *C.char, serverPort C.int) C.int {
 	tx := ptrToTransaction(t)
-	srcAddr := C.GoString(sourceAddress)
+	srcAddr := CChartoString(sourceAddress)
 	cp := int(clientPort)
-	ch := C.GoString(serverHost)
+	ch := CChartoString(serverHost)
 	sp := int(serverPort)
 	tx.ProcessConnection(srcAddr, cp, ch, sp)
 	return 0
@@ -137,7 +154,7 @@ func coraza_update_status_code(t C.coraza_transaction_t, code C.int) C.int {
 func coraza_process_uri(t C.coraza_transaction_t, uri *C.char, method *C.char, proto *C.char) C.int {
 	tx := ptrToTransaction(t)
 
-	tx.ProcessURI(C.GoString(uri), C.GoString(method), C.GoString(proto))
+	tx.ProcessURI(CChartoString(uri), CChartoString(method), CChartoString(proto))
 	return 0
 }
 
@@ -212,7 +229,7 @@ func coraza_rules_add_file(w C.coraza_waf_t, file *C.char, er **C.char) C.int {
 		// we share the pointer, so we shouldn't free it, right?
 		return 0
 	}
-	wafMap[uint64(w)] = waf
+	wafMap.Store(uint64(w), waf)
 	return 1
 }
 
@@ -225,7 +242,7 @@ func coraza_rules_add(w C.coraza_waf_t, directives *C.char, er **C.char) C.int {
 		// we share the pointer, so we shouldn't free it, right?
 		return 0
 	}
-	wafMap[uint64(w)] = waf
+	wafMap.Store(uint64(w), waf)
 	return 1
 }
 
@@ -240,7 +257,7 @@ func coraza_free_transaction(t C.coraza_transaction_t) C.int {
 	if tx.Close() != nil {
 		return 1
 	}
-	delete(txMap, uint64(t))
+	txMap.Delete(uint64(t))
 	return 0
 }
 
@@ -289,7 +306,7 @@ func coraza_request_body_from_file(t C.coraza_transaction_t, file *C.char) C.int
 //export coraza_free_waf
 func coraza_free_waf(t C.coraza_waf_t) C.int {
 	// waf := ptrToWaf(t)
-	delete(wafMap, uint64(t))
+	txMap.Delete(uint64(t))
 	return 0
 }
 
@@ -346,7 +363,7 @@ func coraza_free_log_data(log *C.char) {
 //export coraza_set_server_name
 func coraza_set_server_name(t C.coraza_transaction_t, name *C.char, name_len C.int) {
 	tx := ptrToTransaction(t)
-	tx.SetServerName(C.GoStringN(name, name_len))
+	tx.SetServerName(CChartoStringN(name, name_len))
 }
 
 // TODO: implement
@@ -357,25 +374,25 @@ func coraza_request_body_reader() {
 //export coraza_add_get_request_argument
 func coraza_add_get_request_argument(t C.coraza_transaction_t, key *C.char, key_len C.int, value *C.char, value_len C.int) {
 	tx := ptrToTransaction(t)
-	tx.AddGetRequestArgument(C.GoStringN(key, key_len), C.GoStringN(value, value_len))
+	tx.AddGetRequestArgument(CChartoStringN(key, key_len), CChartoStringN(value, value_len))
 }
 
 //export coraza_add_post_request_argument
 func coraza_add_post_request_argument(t C.coraza_transaction_t, key *C.char, key_len C.int, value *C.char, value_len C.int) {
 	tx := ptrToTransaction(t)
-	tx.AddPostRequestArgument(C.GoStringN(key, key_len), C.GoStringN(value, value_len))
+	tx.AddPostRequestArgument(CChartoStringN(key, key_len), CChartoStringN(value, value_len))
 }
 
 //export coraza_add_path_request_argument
 func coraza_add_path_request_argument(t C.coraza_transaction_t, key *C.char, key_len C.int, value *C.char, value_len C.int) {
 	tx := ptrToTransaction(t)
-	tx.AddPathRequestArgument(C.GoStringN(key, key_len), C.GoStringN(value, value_len))
+	tx.AddPathRequestArgument(CChartoStringN(key, key_len), CChartoStringN(value, value_len))
 }
 
 //export coraza_add_response_argument
 func coraza_add_response_argument(t C.coraza_transaction_t, key *C.char, key_len C.int, value *C.char, value_len C.int) {
 	tx := ptrToTransaction(t)
-	tx.AddResponseArgument(C.GoStringN(key, key_len), C.GoStringN(value, value_len))
+	tx.AddResponseArgument(CChartoStringN(key, key_len), CChartoStringN(value, value_len))
 }
 
 // TODO: implement
@@ -454,26 +471,51 @@ Internal helpers
 */
 
 func ptrToWaf(waf C.coraza_waf_t) coraza.WAF {
-	return wafMap[uint64(waf)]
+
+	if val, ok := wafMap.Load(uint64(waf)); ok {
+		return val.(coraza.WAF)
+	}
+	return nil
 }
 
 func ptrToTransaction(t C.coraza_transaction_t) types.Transaction {
-	return txMap[uint64(t)]
+	if val, ok := txMap.Load(uint64(t)); ok {
+		return val.(types.Transaction)
+	}
+
+	return nil
 }
 
 func transactionToPtr(tx types.Transaction) uint64 {
-	u := (*uint64)(unsafe.Pointer(&tx))
-	return *u
+	h := fnv.New64a()
+	h.Write([]byte(tx.ID()))
+	return h.Sum64()
 }
 
 func wafToPtr(waf coraza.WAF) uint64 {
-	u := (*uint64)(unsafe.Pointer(&waf))
-	return *u
+	return rand.Uint64()
 }
 
 // It should just be C.CString(s) but we need this to build tests
 func stringToC(s string) *C.char {
 	return C.CString(s)
 }
-
+func CChartoString(cStr *C.char) string {
+	// zero copy C.char convert to go string
+	myStr := new(reflect.StringHeader)
+	cStrLen := C.strnlen(cStr, 65535)
+	myStr.Data = (uintptr)(unsafe.Pointer(cStr))
+	myStr.Len = int(cStrLen)
+	golongStr := *(*string)(unsafe.Pointer(myStr))
+	return golongStr
+}
+func CChartoStringN(cStr *C.char, len C.int) string {
+	// zero copy C.char convert to go string with length
+	myStr := new(reflect.StringHeader)
+	//cStrLen := C.strnlen(cStr, 65535)
+	myStr.Data = (uintptr)(unsafe.Pointer(cStr))
+	myStr.Len = int(len)
+	golongStr := *(*string)(unsafe.Pointer(myStr))
+	return golongStr
+}
 func main() {}
